@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JuiceFlow - Juice Business Management</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useMemo,useEffect}=React;
+const STORAGE_KEY='juiceflow_v2';
+const PRODUCTS=[{id:'330ml',name:'330ml Can',prices:[30000,28000,27000],cost:766},{id:'500ml',name:'500ml Can',prices:[40000,38000,37000],cost:1150},{id:'5L',name:'5L Jerrycan',prices:[325000,295000],cost:4500}];
+const FLAVOURS=['Hi Tea','Black Lemonade','Hibiscus','Tamarind'];
+const LOCATIONS={'NIL':0,'Bugolobi':2000,'Bukoto':6000,'CBD':5000,'Kololo':5000,'Ntinda':5000,'Naguru':5000,'Kira':6000,'Kireka':3000,'Mutungo':3000,'Entebbe':18000,'Kansanga':6000,'Najjera':8000};
+const CLIENTS=['Hamid','Maxime','Allan','Julius','Jason','Juma','Stefano','Mark','Kevin','Josh','Lorna','Sharon','Manu','Musa','Omid','Gordon','Eddy','Marvin','Keith','David','Nisha','Rahim','Joel','Mike','Gloria','Hope','Tom','Davis'];
+const DEBTS={'Maxime':126000,'Hamid':390000,'Omid':100000,'Lorna':80000,'Jason':130000};
+const DRIVERS=[{id:'D1',name:'Benjamin Muwonge'},{id:'D2',name:'Hussein Musisi'},{id:'D3',name:'Ronald Kabiswa'},{id:'D4',name:'Safe Boda'}];
+const PROFIT_START=4650000;
+
+const initClients=CLIENTS.map((n,i)=>({id:`C${i+1}`,name:n,debt:DEBTS[n]||0}));
+const initBatches=[
+  {id:'INV-279',items:[{p:'330ml',init:119,rem:109},{p:'500ml',init:79,rem:61},{p:'5L',init:1,rem:1}],status:'Partial'},
+  {id:'INV-280',items:[{p:'330ml',init:60,rem:0},{p:'500ml',init:50,rem:0},{p:'5L',init:4,rem:2}],status:'Cleared'}
+];
+const initCash=[{id:'T1',type:'Opening',src:'MM',amt:469235,desc:'Opening Balance',date:'2026-01-26'}];
+
+const Badge=({children,v='default'})=>{
+  const c={default:'bg-slate-100 text-slate-700',success:'bg-emerald-100 text-emerald-700',warning:'bg-amber-100 text-amber-700',danger:'bg-rose-100 text-rose-700',info:'bg-sky-100 text-sky-700'};
+  return <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${c[v]}`}>{children}</span>;
+};
+
+const Btn=({children,v='primary',onClick,disabled,cls=''})=>{
+  const c={primary:'bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 shadow-lg',secondary:'bg-slate-200 text-slate-700 hover:bg-slate-300',success:'bg-gradient-to-r from-emerald-500 to-teal-500 text-white',ghost:'bg-transparent text-slate-600 hover:bg-slate-100'};
+  return <button onClick={onClick} disabled={disabled} className={`px-4 py-2.5 rounded-xl font-semibold transition-all ${c[v]} ${cls} disabled:opacity-50`}>{children}</button>;
+};
+
+const Modal=({open,onClose,title,children})=>{
+  if(!open)return null;
+  return <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose}/>
+    <div className="relative bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden shadow-2xl">
+      <div className="flex justify-between items-center p-5 border-b"><h3 className="font-bold text-xl">{title}</h3><button onClick={onClose} className="text-2xl text-slate-400 hover:text-slate-600">×</button></div>
+      <div className="p-5 overflow-y-auto max-h-[70vh]">{children}</div>
+    </div>
+  </div>;
+};
+
+const Input=({label,value,onChange,type='text',placeholder})=><div className="mb-3">
+  <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+  <input type={type} value={value} onChange={onChange} placeholder={placeholder} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:border-orange-500 outline-none"/>
+</div>;
+
+const Sel=({label,value,onChange,opts,placeholder})=><div className="mb-3">
+  <label className="block text-sm font-semibold text-slate-700 mb-1">{label}</label>
+  <select value={value} onChange={onChange} className="w-full px-4 py-2.5 border-2 border-slate-200 rounded-xl focus:border-orange-500 outline-none">
+    <option value="">{placeholder||'Select...'}</option>
+    {opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+  </select>
+</div>;
+
+const SheetsSetup=({onClose})=>{
+  const [copied,setCopied]=useState(false);
+  const code=`function doPost(e) {
+  const data = JSON.parse(e.postData.contents);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if(data.orders) updateSheet(ss,'Orders',data.orders);
+  if(data.clients) updateSheet(ss,'Clients',data.clients);
+  if(data.summary) updateSheet(ss,'Summary',[data.summary]);
+  return ContentService.createTextOutput(JSON.stringify({success:true}));
+}
+function updateSheet(ss,name,data){
+  let sheet=ss.getSheetByName(name)||ss.insertSheet(name);
+  if(data.length>0){
+    sheet.clear();
+    sheet.appendRow(Object.keys(data[0]));
+    data.forEach(row=>sheet.appendRow(Object.values(row)));
+  }
+}`;
+  return <div className="space-y-4">
+    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+      <h4 className="font-bold text-emerald-900 mb-3">📋 Setup Steps (No Coding!):</h4>
+      <ol className="space-y-2 text-sm text-emerald-800">
+        <li><strong>1.</strong> Go to sheets.google.com → Create new spreadsheet</li>
+        <li><strong>2.</strong> Name it "JuiceFlow Data"</li>
+        <li><strong>3.</strong> Click Extensions → Apps Script</li>
+        <li><strong>4.</strong> Delete any code there, paste the code below</li>
+        <li><strong>5.</strong> Click Deploy → New deployment</li>
+        <li><strong>6.</strong> Select "Web app" → Set access to "Anyone"</li>
+        <li><strong>7.</strong> Click Deploy → Copy the URL</li>
+        <li><strong>8.</strong> Paste URL in Settings → Click Sync!</li>
+      </ol>
+    </div>
+    <div>
+      <div className="flex justify-between items-center mb-2">
+        <span className="text-sm font-semibold">Code to copy:</span>
+        <Btn v="secondary" onClick={()=>{navigator.clipboard.writeText(code);setCopied(true);setTimeout(()=>setCopied(false),2000);}}>{copied?'✓ Copied!':'📋 Copy'}</Btn>
+      </div>
+      <div className="bg-slate-900 rounded-xl p-3 max-h-32 overflow-auto">
+        <pre className="text-xs text-slate-300 whitespace-pre-wrap">{code}</pre>
+      </div>
+    </div>
+    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+      ⚠️ <strong>Important:</strong> The URL looks like: https://script.google.com/macros/s/ABC.../exec
+    </div>
+  </div>;
+};
+
+function App(){
+  const load=()=>{try{const s=localStorage.getItem(STORAGE_KEY);return s?JSON.parse(s):null;}catch(e){return null;}};
+  const saved=load();
+  
+  const [logged,setLogged]=useState(false);
+  const [tab,setTab]=useState('dash');
+  const [sidebar,setSidebar]=useState(true);
+  const [batches,setBatches]=useState(saved?.batches||initBatches);
+  const [clients,setClients]=useState(saved?.clients||initClients);
+  const [orders,setOrders]=useState(saved?.orders||[]);
+  const [cash,setCash]=useState(saved?.cash||initCash);
+  const [drivers,setDrivers]=useState(saved?.drivers||DRIVERS);
+  const [sheetsUrl,setSheetsUrl]=useState(saved?.sheetsUrl||'');
+  const [lastSync,setLastSync]=useState(saved?.lastSync||null);
+  const [syncStatus,setSyncStatus]=useState('idle');
+  
+  const [showSettings,setShowSettings]=useState(false);
+  const [showSetup,setShowSetup]=useState(false);
+  const [showOrder,setShowOrder]=useState(false);
+  const [showCollect,setShowCollect]=useState(false);
+  const [showBatch,setShowBatch]=useState(false);
+  const [showClient,setShowClient]=useState(false);
+  const [showDriver,setShowDriver]=useState(false);
+  const [showPayDriver,setShowPayDriver]=useState(false);
+  const [selOrder,setSelOrder]=useState(null);
+  const [selDriver,setSelDriver]=useState(null);
+  
+  const [newOrd,setNewOrd]=useState({client:'',product:'',flavour:'',qty:'',price:'0',loc:'',status:'Pending',method:'',driver:''});
+  const [newBat,setNewBat]=useState({ref:'',q330:'',q500:'',q5L:''});
+  const [newCli,setNewCli]=useState({name:'',phone:''});
+  const [newDrv,setNewDrv]=useState({name:'',phone:''});
+  const [recon,setRecon]=useState({cash:'',mm:''});
+
+  useEffect(()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify({batches,clients,orders,cash,drivers,sheetsUrl,lastSync}));}catch(e){}},[batches,clients,orders,cash,drivers,sheetsUrl,lastSync]);
+
+  const stock=useMemo(()=>{
+    const s={'330ml':0,'500ml':0,'5L':0};
+    batches.forEach(b=>b.items.forEach(i=>s[i.p]+=i.rem));
+    return s;
+  },[batches]);
+
+  const totals=useMemo(()=>{
+    const cashBal=cash.filter(t=>t.src==='Cash').reduce((a,t)=>a+t.amt,0);
+    const mmBal=cash.filter(t=>t.src==='MM').reduce((a,t)=>a+t.amt,0);
+    const debt=clients.reduce((a,c)=>a+c.debt,0);
+    const pending=orders.filter(o=>o.status==='Pending');
+    return {cashBal,mmBal,debt,pending,pendingAmt:pending.reduce((a,o)=>a+o.total,0),totalStock:stock['330ml']+stock['500ml']+stock['5L']};
+  },[cash,clients,orders,stock]);
+
+  const profit=useMemo(()=>{
+    let p=PROFIT_START;
+    batches.forEach(b=>{
+      let cost=0,rev=0;
+      b.items.forEach(i=>{
+        const prod=PRODUCTS.find(x=>x.id===i.p);
+        cost+=i.init*(prod.cost/0.0335);
+        rev+=i.init*prod.prices[1];
+      });
+      const sold=b.items.reduce((s,i)=>s+(1-i.rem/i.init),0)/b.items.length;
+      p+=(rev-cost)*sold;
+    });
+    return Math.round(p);
+  },[batches]);
+
+  const driverEarn=useMemo(()=>{
+    const e={};
+    drivers.forEach(d=>e[d.name]={total:0,unpaid:0,deliveries:[]});
+    orders.forEach(o=>{
+      if(o.driver&&o.delFee>0){
+        if(!e[o.driver])e[o.driver]={total:0,unpaid:0,deliveries:[]};
+        e[o.driver].total+=o.delFee;
+        e[o.driver].deliveries.push({id:o.id,amt:o.delFee,paid:o.driverPaid});
+        if(!o.driverPaid)e[o.driver].unpaid+=o.delFee;
+      }
+    });
+    return e;
+  },[orders,drivers]);
+
+  const syncToSheets=async()=>{
+    if(!sheetsUrl){setShowSettings(true);return;}
+    setSyncStatus('syncing');
+    try{
+      const payload={
+        orders:orders.map(o=>({id:o.id,date:o.date,client:o.client,product:o.product,flavour:o.flavour,qty:o.qty,total:o.total,status:o.status,driver:o.driver||'',paid:o.driverPaid?'Yes':'No'})),
+        clients:clients.map(c=>({id:c.id,name:c.name,debt:c.debt,phone:c.phone||''})),
+        summary:{date:new Date().toISOString().split('T')[0],totalStock:totals.totalStock,s330:stock['330ml'],s500:stock['500ml'],s5L:stock['5L'],cash:totals.cashBal,mm:totals.mmBal,outstanding:totals.debt,profit:profit}
+      };
+      await fetch(sheetsUrl,{method:'POST',body:JSON.stringify(payload)});
+      setSyncStatus('success');
+      setLastSync(new Date().toISOString());
+    }catch(e){setSyncStatus('error');}
+    setTimeout(()=>setSyncStatus('idle'),3000);
+  };
+
+  const exportCSV=()=>{
+    const csv=[['ID','Date','Client','Product','Flavour','Qty','Total','Status','Driver'].join(','),...orders.map(o=>[o.id,o.date,o.client,o.product,o.flavour,o.qty,o.total,o.status,o.driver||''].join(','))].join('\n');
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='juiceflow-orders.csv';a.click();
+  };
+
+  const deduct=(prod,qty)=>{
+    let rem=qty;
+    const upd=[...batches];
+    for(let b of upd){if(rem<=0)break;const it=b.items.find(i=>i.p===prod&&i.rem>0);if(it){const d=Math.min(it.rem,rem);it.rem-=d;rem-=d;}}
+    setBatches(upd);
+  };
+
+  const createOrder=()=>{
+    const prod=PRODUCTS.find(p=>p.id===newOrd.product);
+    const price=prod.prices[parseInt(newOrd.price)]||prod.prices[0];
+    const delFee=LOCATIONS[newOrd.loc]||0;
+    const qty=parseInt(newOrd.qty);
+    const total=qty*price+delFee;
+    const id=`ORD-${String(orders.length+1).padStart(3,'0')}`;
+    const ord={id,client:newOrd.client,product:newOrd.product,flavour:newOrd.flavour,qty,price,delFee,loc:newOrd.loc,status:newOrd.status,method:newOrd.status==='Paid'?newOrd.method:null,total,date:new Date().toISOString().split('T')[0],driver:newOrd.driver||null,driverPaid:false};
+    setOrders([...orders,ord]);
+    deduct(newOrd.product,qty);
+    if(newOrd.status==='Paid'){
+      setCash([...cash,{id:`T${cash.length+1}`,type:'Sale',src:newOrd.method==='Cash'?'Cash':'MM',amt:total,desc:`From ${newOrd.client}`,date:new Date().toISOString().split('T')[0]}]);
+    }else{
+      setClients(clients.map(c=>c.name===newOrd.client?{...c,debt:c.debt+total}:c));
+    }
+    setNewOrd({client:'',product:'',flavour:'',qty:'',price:'0',loc:'',status:'Pending',method:'',driver:''});
+    setShowOrder(false);
+  };
+
+  const collect=(method)=>{
+    if(!selOrder)return;
+    setOrders(orders.map(o=>o.id===selOrder.id?{...o,status:'Paid',method}:o));
+    setCash([...cash,{id:`T${cash.length+1}`,type:'Sale',src:method==='Cash'?'Cash':'MM',amt:selOrder.total,desc:`From ${selOrder.client}`,date:new Date().toISOString().split('T')[0]}]);
+    setClients(clients.map(c=>c.name===selOrder.client?{...c,debt:Math.max(0,c.debt-selOrder.total)}:c));
+    setSelOrder(null);
+    setShowCollect(false);
+  };
+
+  const addBatch=()=>{
+    const items=[];
+    if(newBat.q330)items.push({p:'330ml',init:parseInt(newBat.q330),rem:parseInt(newBat.q330)});
+    if(newBat.q500)items.push({p:'500ml',init:parseInt(newBat.q500),rem:parseInt(newBat.q500)});
+    if(newBat.q5L)items.push({p:'5L',init:parseInt(newBat.q5L),rem:parseInt(newBat.q5L)});
+    setBatches([...batches,{id:`INV-${281+batches.length}`,ref:newBat.ref,items,status:'Pending',date:new Date().toISOString().split('T')[0]}]);
+    setNewBat({ref:'',q330:'',q500:'',q5L:''});
+    setShowBatch(false);
+  };
+
+  const addClient=()=>{
+    setClients([...clients,{id:`C${clients.length+1}`,name:newCli.name,debt:0,phone:newCli.phone}]);
+    setNewCli({name:'',phone:''});
+    setShowClient(false);
+  };
+
+  const addDriver=()=>{
+    setDrivers([...drivers,{id:`D${drivers.length+1}`,name:newDrv.name,phone:newDrv.phone}]);
+    setNewDrv({name:'',phone:''});
+    setShowDriver(false);
+  };
+
+  const payDriver=(method)=>{
+    if(!selDriver)return;
+    const total=driverEarn[selDriver]?.unpaid||0;
+    if(total>0){
+      setOrders(orders.map(o=>o.driver===selDriver&&!o.driverPaid?{...o,driverPaid:true}:o));
+      setCash([...cash,{id:`T${cash.length+1}`,type:'Driver Pay',src:method==='Cash'?'Cash':'MM',amt:-total,desc:`To ${selDriver}`,date:new Date().toISOString().split('T')[0]}]);
+    }
+    setSelDriver(null);
+    setShowPayDriver(false);
+  };
+
+  const reconResult=()=>{
+    const actCash=parseFloat(recon.cash)||0;
+    const actMM=parseFloat(recon.mm)||0;
+    return {cashVar:actCash-totals.cashBal,mmVar:actMM-totals.mmBal,total:(actCash-totals.cashBal)+(actMM-totals.mmBal)};
+  };
+
+  if(!logged)return(
+    <div className="min-h-screen bg-gradient-to-br from-yellow-400 via-yellow-500 to-amber-500 flex items-center justify-center p-4">
+      <div className="text-center">
+        <div className="w-28 h-28 mx-auto mb-6 bg-black rounded-2xl flex items-center justify-center shadow-2xl"><span className="text-yellow-400 font-black text-4xl">JF</span></div>
+        <h1 className="text-4xl font-black text-black mb-2">JuiceFlow</h1>
+        <p className="text-black/70 mb-2">Juice Business Management</p>
+        <p className="text-black/50 text-sm mb-8">Hi Tea • Black Lemonade • Hibiscus • Tamarind</p>
+        <button onClick={()=>setLogged(true)} className="w-full flex items-center justify-center gap-3 p-4 bg-black hover:bg-gray-900 rounded-2xl shadow-xl transition-all">
+          <span className="text-yellow-400 text-xl">⚡</span>
+          <span className="text-white font-bold text-lg">Enter Dashboard</span>
+          <span className="text-yellow-400">→</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  const nav=[{id:'dash',icon:'📊',label:'Dashboard'},{id:'orders',icon:'🛒',label:'Orders'},{id:'inv',icon:'📦',label:'Inventory'},{id:'clients',icon:'👥',label:'Clients'},{id:'drivers',icon:'🚴',label:'Drivers'},{id:'cash',icon:'💰',label:'Cash Flow'},{id:'recon',icon:'🎯',label:'Reconciliation'}];
+
+  return(
+    <div className="min-h-screen bg-slate-100 flex">
+      <aside className={`fixed left-0 top-0 h-full bg-slate-900 transition-all z-40 ${sidebar?'w-60':'w-16'}`}>
+        <div className="p-4 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center"><span className="text-black font-bold">JF</span></div>
+            {sidebar&&<span className="text-white font-bold text-lg">JuiceFlow</span>}
+          </div>
+        </div>
+        <nav className="p-3 space-y-1">
+          {nav.map(n=><button key={n.id} onClick={()=>setTab(n.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${tab===n.id?'bg-gradient-to-r from-orange-500 to-amber-500 text-white':'text-slate-400 hover:bg-slate-800 hover:text-white'}`}><span className="text-lg">{n.icon}</span>{sidebar&&<span>{n.label}</span>}</button>)}
+        </nav>
+        <div className="absolute bottom-4 left-3 right-3 space-y-2">
+          <button onClick={()=>setSidebar(!sidebar)} className="w-full text-slate-400 hover:text-white hover:bg-slate-800 p-2 rounded-xl">☰</button>
+          <button onClick={()=>setLogged(false)} className="w-full text-slate-400 hover:text-white hover:bg-slate-800 p-2 rounded-xl">🚪</button>
+        </div>
+      </aside>
+      
+      <main className={`flex-1 p-6 transition-all ${sidebar?'ml-60':'ml-16'}`}>
+        {tab==='dash'&&<div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div><h2 className="text-2xl font-bold text-slate-900">Dashboard</h2><p className="text-slate-500">{new Date().toLocaleDateString('en-UG',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p></div>
+            <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm ${sheetsUrl?'bg-emerald-50 text-emerald-700':'bg-slate-100 text-slate-500'}`}>
+                {sheetsUrl?'☁️':'📴'} {syncStatus==='syncing'?'Syncing...':syncStatus==='success'?'Synced!':sheetsUrl?'Connected':'Not connected'}
+              </div>
+              <Btn v="secondary" onClick={syncToSheets}>☁️ Sync</Btn>
+              <Btn v="ghost" onClick={()=>setShowSettings(true)}>⚙️</Btn>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl p-5 text-white"><span className="text-2xl">📦</span><p className="text-white/80 text-sm mt-2">Total Stock</p><p className="text-3xl font-bold">{totals.totalStock}</p></div>
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white"><span className="text-2xl">💵</span><p className="text-white/80 text-sm mt-2">Cash + MM</p><p className="text-2xl font-bold">UGX {(totals.cashBal+totals.mmBal).toLocaleString()}</p></div>
+            <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl p-5 text-white"><span className="text-2xl">👥</span><p className="text-white/80 text-sm mt-2">Outstanding</p><p className="text-2xl font-bold">UGX {totals.debt.toLocaleString()}</p></div>
+            <div className="bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl p-5 text-white"><span className="text-2xl">📈</span><p className="text-white/80 text-sm mt-2">Profit Balance</p><p className="text-2xl font-bold">UGX {profit.toLocaleString()}</p></div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="bg-gradient-to-br from-sky-500 to-blue-600 rounded-2xl p-5 text-white text-center"><p className="text-4xl font-bold">{stock['330ml']}</p><p className="text-white/80 mt-1">330ml cans</p></div>
+            <div className="bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl p-5 text-white text-center"><p className="text-4xl font-bold">{stock['500ml']}</p><p className="text-white/80 mt-1">500ml cans</p></div>
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white text-center"><p className="text-4xl font-bold">{stock['5L']}</p><p className="text-white/80 mt-1">5L jerrycans</p></div>
+          </div>
+        </div>}
+
+        {tab==='orders'&&<div className="space-y-4">
+          <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Orders</h2><div className="flex gap-2"><Btn v="secondary" onClick={exportCSV}>📥 Export</Btn><Btn onClick={()=>setShowOrder(true)}>+ New Order</Btn></div></div>
+          {totals.pending.length>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center gap-2"><span className="text-amber-600">⚠️</span><span className="font-semibold text-amber-900">{totals.pending.length} pending orders - UGX {totals.pendingAmt.toLocaleString()}</span></div>}
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <table className="w-full"><thead className="bg-slate-50"><tr><th className="text-left p-4 text-xs font-bold text-slate-500">Order</th><th className="text-left p-4 text-xs font-bold text-slate-500">Client</th><th className="text-left p-4 text-xs font-bold text-slate-500">Product</th><th className="text-left p-4 text-xs font-bold text-slate-500">Driver</th><th className="text-left p-4 text-xs font-bold text-slate-500">Total</th><th className="text-left p-4 text-xs font-bold text-slate-500">Status</th><th className="p-4"></th></tr></thead>
+            <tbody>{orders.length===0?<tr><td colSpan="7" className="p-8 text-center text-slate-400">No orders yet</td></tr>:orders.slice().reverse().map(o=><tr key={o.id} className="border-t hover:bg-slate-50"><td className="p-4 font-mono text-orange-600">{o.id}</td><td className="p-4 font-semibold">{o.client}</td><td className="p-4"><Badge v="info">{o.product}</Badge> x{o.qty}</td><td className="p-4 text-slate-600">{o.driver||'-'}</td><td className="p-4 font-bold">UGX {o.total.toLocaleString()}</td><td className="p-4"><Badge v={o.status==='Paid'?'success':'warning'}>{o.status}</Badge></td><td className="p-4">{o.status==='Pending'&&<Btn v="success" onClick={()=>{setSelOrder(o);setShowCollect(true);}}>Collect</Btn>}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </div>}
+
+        {tab==='inv'&&<div className="space-y-4">
+          <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Inventory</h2><Btn onClick={()=>setShowBatch(true)}>+ New Batch</Btn></div>
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <table className="w-full"><thead className="bg-slate-50"><tr><th className="text-left p-4 text-xs font-bold text-slate-500">Batch</th><th className="text-left p-4 text-xs font-bold text-slate-500">330ml</th><th className="text-left p-4 text-xs font-bold text-slate-500">500ml</th><th className="text-left p-4 text-xs font-bold text-slate-500">5L</th><th className="text-left p-4 text-xs font-bold text-slate-500">Status</th></tr></thead>
+            <tbody>{batches.map(b=>{const g=p=>b.items.find(i=>i.p===p);return<tr key={b.id} className="border-t hover:bg-slate-50"><td className="p-4 font-mono text-orange-600">{b.id}</td><td className="p-4">{g('330ml')?`${g('330ml').rem}/${g('330ml').init}`:'-'}</td><td className="p-4">{g('500ml')?`${g('500ml').rem}/${g('500ml').init}`:'-'}</td><td className="p-4">{g('5L')?`${g('5L').rem}/${g('5L').init}`:'-'}</td><td className="p-4"><Badge v={b.status==='Cleared'?'success':'warning'}>{b.status}</Badge></td></tr>;})}</tbody>
+            </table>
+          </div>
+        </div>}
+
+        {tab==='clients'&&<div className="space-y-4">
+          <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Clients ({clients.length})</h2><Btn onClick={()=>setShowClient(true)}>+ Add Client</Btn></div>
+          {totals.debt>0&&<div className="bg-rose-50 border border-rose-200 rounded-xl p-4"><span className="text-rose-600">⚠️</span> <span className="font-bold text-rose-900">Total Outstanding: UGX {totals.debt.toLocaleString()}</span></div>}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {clients.filter(c=>c.debt>0).sort((a,b)=>b.debt-a.debt).map(c=><div key={c.id} className="bg-white rounded-2xl p-5 shadow-lg border-2 border-rose-200"><div className="w-12 h-12 bg-rose-500 rounded-xl flex items-center justify-center text-white font-bold text-lg mb-3">{c.name[0]}</div><p className="font-bold">{c.name}</p><p className="text-xl font-bold text-rose-600">UGX {c.debt.toLocaleString()}</p></div>)}
+            {clients.filter(c=>c.debt===0).slice(0,8).map(c=><div key={c.id} className="bg-white rounded-2xl p-5 shadow-lg border"><div className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center text-white font-bold text-lg mb-3">{c.name[0]}</div><p className="font-bold">{c.name}</p><p className="text-emerald-600 text-sm">No balance</p></div>)}
+          </div>
+        </div>}
+
+        {tab==='drivers'&&<div className="space-y-4">
+          <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Drivers</h2><Btn onClick={()=>setShowDriver(true)}>+ Add Driver</Btn></div>
+          {Object.values(driverEarn).reduce((s,d)=>s+d.unpaid,0)>0&&<div className="bg-amber-50 border border-amber-200 rounded-xl p-4"><span className="text-amber-600">⚠️</span> <span className="font-bold text-amber-900">Total Unpaid: UGX {Object.values(driverEarn).reduce((s,d)=>s+d.unpaid,0).toLocaleString()}</span></div>}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {drivers.map(d=>{const e=driverEarn[d.name]||{total:0,unpaid:0};return<div key={d.id} className={`bg-white rounded-2xl p-5 shadow-lg border-2 ${e.unpaid>0?'border-amber-300':'border-slate-200'}`}>
+              <div className="w-14 h-14 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold text-lg mb-3">{d.name.split(' ').map(n=>n[0]).join('')}</div>
+              <p className="font-bold">{d.name}</p>
+              <p className="text-sm text-slate-500">Total: UGX {e.total.toLocaleString()}</p>
+              {e.unpaid>0&&<><p className="text-amber-600 font-bold">Unpaid: UGX {e.unpaid.toLocaleString()}</p><Btn v="success" cls="w-full mt-3" onClick={()=>{setSelDriver(d.name);setShowPayDriver(true);}}>Pay Driver</Btn></>}
+            </div>;})}
+          </div>
+        </div>}
+
+        {tab==='cash'&&<div className="space-y-4">
+          <h2 className="text-2xl font-bold">Cash Flow</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-gradient-to-br from-orange-500 to-amber-600 rounded-2xl p-5 text-white"><span className="text-2xl">📱</span><p className="text-white/80 mt-2">Mobile Money</p><p className="text-3xl font-bold">UGX {totals.mmBal.toLocaleString()}</p></div>
+            <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white"><span className="text-2xl">💵</span><p className="text-white/80 mt-2">Cash in Hand</p><p className="text-3xl font-bold">UGX {totals.cashBal.toLocaleString()}</p></div>
+          </div>
+          <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            <table className="w-full"><thead className="bg-slate-50"><tr><th className="text-left p-4 text-xs font-bold text-slate-500">ID</th><th className="text-left p-4 text-xs font-bold text-slate-500">Date</th><th className="text-left p-4 text-xs font-bold text-slate-500">Type</th><th className="text-left p-4 text-xs font-bold text-slate-500">Description</th><th className="text-left p-4 text-xs font-bold text-slate-500">Amount</th></tr></thead>
+            <tbody>{cash.slice().reverse().map(t=><tr key={t.id} className="border-t hover:bg-slate-50"><td className="p-4 font-mono text-orange-600">{t.id}</td><td className="p-4 text-slate-500">{t.date}</td><td className="p-4"><Badge v={t.amt>=0?'success':'danger'}>{t.type}</Badge></td><td className="p-4">{t.desc}</td><td className="p-4 font-bold" style={{color:t.amt>=0?'#059669':'#dc2626'}}>{t.amt>=0?'+':''}{t.amt.toLocaleString()}</td></tr>)}</tbody>
+            </table>
+          </div>
+        </div>}
+
+        {tab==='recon'&&<div className="space-y-6">
+          <h2 className="text-2xl font-bold">Daily Reconciliation</h2>
+          <div className="grid grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl p-6 shadow-lg">
+              <h3 className="font-bold text-lg mb-4">📝 Enter Actual Balances</h3>
+              <Input label="Cash in Hand" type="number" value={recon.cash} onChange={e=>setRecon({...recon,cash:e.target.value})} placeholder="Enter actual cash..."/>
+              <Input label="Mobile Money" type="number" value={recon.mm} onChange={e=>setRecon({...recon,mm:e.target.value})} placeholder="Enter actual MM..."/>
+            </div>
+            <div className="bg-white rounded-2xl p-6 shadow-lg">
+              <h3 className="font-bold text-lg mb-4">📊 Results</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between p-3 bg-slate-50 rounded-xl"><span>Cash Variance</span><span className={`font-bold ${reconResult().cashVar===0?'text-emerald-600':'text-rose-600'}`}>{reconResult().cashVar>=0?'+':''}{reconResult().cashVar.toLocaleString()}</span></div>
+                <div className="flex justify-between p-3 bg-slate-50 rounded-xl"><span>MM Variance</span><span className={`font-bold ${reconResult().mmVar===0?'text-emerald-600':'text-rose-600'}`}>{reconResult().mmVar>=0?'+':''}{reconResult().mmVar.toLocaleString()}</span></div>
+                <div className={`flex justify-between p-4 rounded-xl ${reconResult().total===0?'bg-emerald-50':'bg-rose-50'}`}><span className="font-bold">Total Variance</span><span className={`text-xl font-bold ${reconResult().total===0?'text-emerald-600':'text-rose-600'}`}>{reconResult().total>=0?'+':''}{reconResult().total.toLocaleString()}</span></div>
+              </div>
+            </div>
+          </div>
+        </div>}
+      </main>
+
+      <Modal open={showSettings} onClose={()=>setShowSettings(false)} title="⚙️ Settings">
+        <div className="space-y-6">
+          <div>
+            <h4 className="font-bold mb-3">☁️ Google Sheets Sync</h4>
+            <p className="text-sm text-slate-600 mb-3">Backup your data to Google Sheets automatically.</p>
+            <Input label="Google Apps Script URL" value={sheetsUrl} onChange={e=>setSheetsUrl(e.target.value)} placeholder="https://script.google.com/macros/s/..."/>
+            {lastSync&&<p className="text-sm text-slate-500 mt-2">Last synced: {new Date(lastSync).toLocaleString()}</p>}
+            <div className="flex gap-2 mt-3">
+              <Btn onClick={syncToSheets} disabled={!sheetsUrl}>☁️ Sync Now</Btn>
+              <Btn v="secondary" onClick={()=>setShowSetup(true)}>📖 Setup Guide</Btn>
+            </div>
+          </div>
+          <hr/>
+          <div>
+            <h4 className="font-bold mb-3">📥 Export Data</h4>
+            <Btn v="secondary" onClick={exportCSV}>Download Orders CSV</Btn>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={showSetup} onClose={()=>setShowSetup(false)} title="📖 Google Sheets Setup">
+        <SheetsSetup/>
+      </Modal>
+
+      <Modal open={showOrder} onClose={()=>setShowOrder(false)} title="🛒 New Order">
+        <Sel label="Client" value={newOrd.client} onChange={e=>setNewOrd({...newOrd,client:e.target.value})} opts={clients.map(c=>({v:c.name,l:c.name+(c.debt>0?` (owes ${c.debt.toLocaleString()})`:'')}))}/> 
+        <div className="grid grid-cols-2 gap-3">
+          <Sel label="Product" value={newOrd.product} onChange={e=>setNewOrd({...newOrd,product:e.target.value})} opts={PRODUCTS.map(p=>({v:p.id,l:p.name}))}/>
+          <Sel label="Flavour" value={newOrd.flavour} onChange={e=>setNewOrd({...newOrd,flavour:e.target.value})} opts={FLAVOURS.map(f=>({v:f,l:f}))}/>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Quantity" type="number" value={newOrd.qty} onChange={e=>setNewOrd({...newOrd,qty:e.target.value})}/>
+          <Sel label="Price Tier" value={newOrd.price} onChange={e=>setNewOrd({...newOrd,price:e.target.value})} opts={newOrd.product?PRODUCTS.find(p=>p.id===newOrd.product).prices.map((pr,i)=>({v:String(i),l:`UGX ${pr.toLocaleString()}`})):[]}/>
+        </div>
+        <Sel label="Delivery Location" value={newOrd.loc} onChange={e=>setNewOrd({...newOrd,loc:e.target.value})} opts={Object.entries(LOCATIONS).map(([l,f])=>({v:l,l:`${l} (UGX ${f.toLocaleString()})`}))}/>
+        <Sel label="Driver" value={newOrd.driver} onChange={e=>setNewOrd({...newOrd,driver:e.target.value})} opts={drivers.map(d=>({v:d.name,l:d.name}))}/>
+        <Sel label="Payment Status" value={newOrd.status} onChange={e=>setNewOrd({...newOrd,status:e.target.value})} opts={[{v:'Pending',l:'Pending (Credit)'},{v:'Paid',l:'Paid Now'}]}/>
+        {newOrd.status==='Paid'&&<Sel label="Payment Method" value={newOrd.method} onChange={e=>setNewOrd({...newOrd,method:e.target.value})} opts={[{v:'Cash',l:'Cash'},{v:'MM',l:'Mobile Money'}]}/>}
+        {newOrd.product&&newOrd.qty&&<div className="bg-orange-50 border border-orange-200 rounded-xl p-4 mt-3">
+          <p className="font-semibold text-orange-800 mb-2">Order Summary</p>
+          <div className="text-sm space-y-1">
+            <div className="flex justify-between"><span>Unit Price:</span><span>UGX {(PRODUCTS.find(p=>p.id===newOrd.product)?.prices[parseInt(newOrd.price)]||0).toLocaleString()}</span></div>
+            <div className="flex justify-between"><span>Quantity:</span><span>{newOrd.qty}</span></div>
+            <div className="flex justify-between"><span>Delivery:</span><span>UGX {(LOCATIONS[newOrd.loc]||0).toLocaleString()}</span></div>
+            <div className="flex justify-between font-bold text-orange-900 pt-2 border-t border-orange-200"><span>Total:</span><span>UGX {((parseInt(newOrd.qty)||0)*(PRODUCTS.find(p=>p.id===newOrd.product)?.prices[parseInt(newOrd.price)]||0)+(LOCATIONS[newOrd.loc]||0)).toLocaleString()}</span></div>
+          </div>
+        </div>}
+        <div className="flex gap-3 mt-4"><Btn v="secondary" onClick={()=>setShowOrder(false)} cls="flex-1">Cancel</Btn><Btn onClick={createOrder} cls="flex-1" disabled={!newOrd.client||!newOrd.product||!newOrd.qty||!newOrd.flavour}>Create Order</Btn></div>
+      </Modal>
+
+      <Modal open={showCollect} onClose={()=>{setShowCollect(false);setSelOrder(null);}} title="💰 Collect Payment">
+        {selOrder&&<div className="space-y-4">
+          <div className="bg-slate-50 rounded-xl p-5 text-center">
+            <p className="font-mono text-orange-600 mb-1">{selOrder.id}</p>
+            <p className="font-semibold text-lg">{selOrder.client}</p>
+            <p className="text-3xl font-bold mt-2">UGX {selOrder.total.toLocaleString()}</p>
+          </div>
+          <p className="text-sm font-medium text-slate-600">Select payment method:</p>
+          <button onClick={()=>collect('Cash')} className="w-full flex items-center gap-4 p-4 bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 rounded-xl transition-all"><span className="text-2xl">💵</span><span className="font-bold text-emerald-900">Cash</span></button>
+          <button onClick={()=>collect('MM')} className="w-full flex items-center gap-4 p-4 bg-orange-50 hover:bg-orange-100 border-2 border-orange-200 rounded-xl transition-all"><span className="text-2xl">📱</span><span className="font-bold text-orange-900">Mobile Money</span></button>
+        </div>}
+      </Modal>
+
+      <Modal open={showBatch} onClose={()=>setShowBatch(false)} title="📦 Add New Batch">
+        <Input label="Invoice Reference" value={newBat.ref} onChange={e=>setNewBat({...newBat,ref:e.target.value})} placeholder="e.g., Invoice 281"/>
+        <div className="grid grid-cols-3 gap-3">
+          <Input label="330ml Qty" type="number" value={newBat.q330} onChange={e=>setNewBat({...newBat,q330:e.target.value})}/>
+          <Input label="500ml Qty" type="number" value={newBat.q500} onChange={e=>setNewBat({...newBat,q500:e.target.value})}/>
+          <Input label="5L Qty" type="number" value={newBat.q5L} onChange={e=>setNewBat({...newBat,q5L:e.target.value})}/>
+        </div>
+        <div className="flex gap-3 mt-4"><Btn v="secondary" onClick={()=>setShowBatch(false)} cls="flex-1">Cancel</Btn><Btn onClick={addBatch} cls="flex-1" disabled={!newBat.ref}>Add Batch</Btn></div>
+      </Modal>
+
+      <Modal open={showClient} onClose={()=>setShowClient(false)} title="👤 Add Client">
+        <Input label="Client Name" value={newCli.name} onChange={e=>setNewCli({...newCli,name:e.target.value})} placeholder="Enter name..."/>
+        <Input label="Phone (Optional)" value={newCli.phone} onChange={e=>setNewCli({...newCli,phone:e.target.value})} placeholder="Enter phone..."/>
+        <div className="flex gap-3 mt-4"><Btn v="secondary" onClick={()=>setShowClient(false)} cls="flex-1">Cancel</Btn><Btn onClick={addClient} cls="flex-1" disabled={!newCli.name}>Add Client</Btn></div>
+      </Modal>
+
+      <Modal open={showDriver} onClose={()=>setShowDriver(false)} title="🚴 Add Driver">
+        <Input label="Driver Name" value={newDrv.name} onChange={e=>setNewDrv({...newDrv,name:e.target.value})} placeholder="Enter name..."/>
+        <Input label="Phone (Optional)" value={newDrv.phone} onChange={e=>setNewDrv({...newDrv,phone:e.target.value})} placeholder="Enter phone..."/>
+        <div className="flex gap-3 mt-4"><Btn v="secondary" onClick={()=>setShowDriver(false)} cls="flex-1">Cancel</Btn><Btn onClick={addDriver} cls="flex-1" disabled={!newDrv.name}>Add Driver</Btn></div>
+      </Modal>
+
+      <Modal open={showPayDriver} onClose={()=>{setShowPayDriver(false);setSelDriver(null);}} title="💰 Pay Driver">
+        {selDriver&&driverEarn[selDriver]&&<div className="space-y-4">
+          <div className="bg-slate-50 rounded-xl p-5 text-center">
+            <p className="font-bold text-lg">{selDriver}</p>
+            <p className="text-3xl font-bold text-amber-600 mt-2">UGX {driverEarn[selDriver].unpaid.toLocaleString()}</p>
+            <p className="text-sm text-slate-500 mt-1">{driverEarn[selDriver].deliveries.filter(d=>!d.paid).length} unpaid deliveries</p>
+          </div>
+          <p className="text-sm font-medium text-slate-600">Select payment method:</p>
+          <button onClick={()=>payDriver('Cash')} className="w-full flex items-center gap-4 p-4 bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-200 rounded-xl"><span className="text-2xl">💵</span><span className="font-bold text-emerald-900">Pay with Cash</span></button>
+          <button onClick={()=>payDriver('MM')} className="w-full flex items-center gap-4 p-4 bg-orange-50 hover:bg-orange-100 border-2 border-orange-200 rounded-xl"><span className="text-2xl">📱</span><span className="font-bold text-orange-900">Pay with Mobile Money</span></button>
+        </div>}
+      </Modal>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
